@@ -1,0 +1,9 @@
+__pycache__
+av2_data
+data
+ckpt
+dataset
+inertial_dataset
+transformed_dataset
+result
+jupyter
