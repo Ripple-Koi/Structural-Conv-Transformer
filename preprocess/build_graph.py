@@ -1,3 +1,4 @@
+from multiprocessing.dummy import Array
 from typing import Final, List, Optional, Sequence, Set, Tuple
 from pathlib import Path
 import cv2
@@ -7,6 +8,7 @@ from matplotlib.patches import Rectangle
 from matplotlib import transforms
 import io
 import math
+import pickle
 from av2.map.map_api import ArgoverseStaticMap
 from av2.datasets.motion_forecasting.data_schema import ArgoverseScenario, ObjectType, TrackCategory
 from av2.utils.typing import NDArrayFloat, NDArrayInt
@@ -81,7 +83,11 @@ _STATIC_OBJECT_TYPES: Set[ObjectType] = {
 }
 
 
-def build_graph(scenario: ArgoverseScenario, scenario_static_map: ArgoverseStaticMap, save_dir: Path) -> None:
+def build_graph(
+    scenario: ArgoverseScenario, 
+    scenario_static_map: ArgoverseStaticMap, 
+    graph_save_path: Path
+    ) -> Tuple[List[NDArrayInt], List[NDArrayInt], List[NDArrayInt]]:
     """Build dynamic visualization for all tracks and the local map associated with an Argoverse scenario.
 
     Args:
@@ -93,17 +99,17 @@ def build_graph(scenario: ArgoverseScenario, scenario_static_map: ArgoverseStati
     frames_global: List[NDArrayInt] = []
     frames_medium: List[NDArrayInt] = []
     frames_local: List[NDArrayInt] = []
-    save_path_global = save_dir / "global"
-    save_path_medium = save_dir / "medium"
-    save_path_local = save_dir / "local"
-    save_path_global.mkdir(parents=True,exist_ok=True)
-    save_path_medium.mkdir(parents=True,exist_ok=True)
-    save_path_local.mkdir(parents=True,exist_ok=True)
+    # save_path_global = graph_save_path.parents[0] / "global"
+    # save_path_medium = graph_save_path.parents[0] / "medium"
+    # save_path_local = graph_save_path.parents[0] / "local"
+    # save_path_global.mkdir(parents=True,exist_ok=True)
+    # save_path_medium.mkdir(parents=True,exist_ok=True)
+    # save_path_local.mkdir(parents=True,exist_ok=True)
 
     plot_bounds: _PlotBounds = (0, 0, 0, 0)
-
-    for timestep in range(_OBS_DURATION_TIMESTEPS + _PRED_DURATION_TIMESTEPS):
-        ratio = 1  # control figure size and resolution
+    ratio = 1  # control figure size and resolution
+    
+    for timestep in range(_OBS_DURATION_TIMESTEPS):
         _, ax = plt.subplots(figsize=(0.72 * ratio, 0.24 * ratio), dpi=100)  # 72*24 pixels, fit map bounds 72*24, 36*12, 18*6
 
         # Plot static map elements and actor tracks
@@ -143,7 +149,7 @@ def build_graph(scenario: ArgoverseScenario, scenario_static_map: ArgoverseStati
         buf.close()
         frame = cv2.imdecode(img_arr, cv2.IMREAD_GRAYSCALE)
         frames_global.append(frame)
-        cv2.imwrite(str(save_path_global / f'{timestep}.png'), frame)
+        # cv2.imwrite(str(save_path_global / f'{timestep}.png'), frame)
 
         # Set map bounds, line width and marker size for medium map
         for line in plt.gca().lines:
@@ -160,7 +166,7 @@ def build_graph(scenario: ArgoverseScenario, scenario_static_map: ArgoverseStati
         buf.close()
         frame = cv2.imdecode(img_arr, cv2.IMREAD_GRAYSCALE)
         frames_medium.append(frame)
-        cv2.imwrite(str(save_path_medium / f'{timestep}.png'), frame)
+        # cv2.imwrite(str(save_path_medium / f'{timestep}.png'), frame)
 
         # Set map bounds, line width and marker size for local map
         for line in plt.gca().lines:
@@ -172,15 +178,16 @@ def build_graph(scenario: ArgoverseScenario, scenario_static_map: ArgoverseStati
         # Save plotted frame as array and image
         buf = io.BytesIO()
         plt.savefig(buf, format="png")
-        plt.close()
         buf.seek(0)
         img_arr = np.frombuffer(buf.getvalue(), dtype=np.uint8)
         buf.close()
         frame = cv2.imdecode(img_arr, cv2.IMREAD_GRAYSCALE)
         frames_local.append(frame)
-        cv2.imwrite(str(save_path_local / f'{timestep}.png'), frame)
+        # cv2.imwrite(str(save_path_local / f'{timestep}.png'), frame)
+        plt.close()
     
-    np.savez_compressed(str(save_dir / "all.npz"), GLOBAL=frames_global, MEDIUM=frames_medium, LOCAL=frames_local)
+    return frames_global, frames_medium, frames_local
+    # np.savez_compressed(str(graph_save_path), GLOBAL=frames_global, MEDIUM=frames_medium, LOCAL=frames_local)
 
 
 def _plot_static_map_elements(static_map: ArgoverseStaticMap, show_ped_xings: bool = True) -> None:
@@ -234,64 +241,60 @@ def _plot_actor_tracks(ax: plt.Axes, scenario: ArgoverseScenario, timestep: int)
     """
     track_bounds = None
     for track in scenario.tracks:
-        # Get timesteps for which actor data is valid
-        actor_timesteps: NDArrayInt = np.array(
-            [object_state.timestep for object_state in track.object_states if object_state.timestep <= timestep]
-        )
-        if actor_timesteps.shape[0] < 1 or actor_timesteps[-1] != timestep:
+        # Get current actor trajectory and heading for which actor data is valid
+        no_object: bool = True
+        for object_state in track.object_states:
+            if object_state.timestep == timestep:
+                no_object = False
+                actor_trajectory: List[float] = list(object_state.position)
+                actor_headings: float = object_state.heading
+        
+        if no_object:
             continue
 
-        # Get actor trajectory and heading history
-        actor_trajectory: NDArrayFloat = np.array(
-            [list(object_state.position) for object_state in track.object_states if object_state.timestep <= timestep]
-        )
-        actor_headings: NDArrayFloat = np.array(
-            [object_state.heading for object_state in track.object_states if object_state.timestep <= timestep]
-        )
-
         if track.category == TrackCategory.FOCAL_TRACK:
-            x_min, x_max = actor_trajectory[0, 0], actor_trajectory[-1, 0]
-            y_min, y_max = actor_trajectory[0, 1], actor_trajectory[-1, 1]
+            x_min, x_max = actor_trajectory[0], actor_trajectory[0]
+            y_min, y_max = actor_trajectory[1], actor_trajectory[1]
             track_bounds = (x_min, x_max, y_min, y_max)
-            cur_heading = actor_headings[-1]
+            cur_heading = actor_headings
 
         # Plot all actors
         if track.object_type == ObjectType.VEHICLE:
             _plot_actor_bounding_box(
                 ax,
-                actor_trajectory[-1],
-                actor_headings[-1],
+                actor_trajectory,
+                actor_headings,
                 _CAR_COLOR,
                 (_ESTIMATED_VEHICLE_LENGTH_M, _ESTIMATED_VEHICLE_WIDTH_M),
             )
         elif track.object_type == ObjectType.CYCLIST:
             _plot_actor_bounding_box(
                 ax,
-                actor_trajectory[-1],
-                actor_headings[-1],
+                actor_trajectory,
+                actor_headings,
                 _CYCLIST_COLOR,
                 (_ESTIMATED_CYCLIST_LENGTH_M, _ESTIMATED_CYCLIST_WIDTH_M),
             )
         elif track.object_type == ObjectType.MOTORCYCLIST:
             _plot_actor_bounding_box(
                 ax,
-                actor_trajectory[-1],
-                actor_headings[-1],
+                actor_trajectory,
+                actor_headings,
                 _MOTORCYCLIST_COLOR,
                 (_ESTIMATED_MOTORCYCLIST_LENGTH_M, _ESTIMATED_MOTORCYCLIST_WIDTH_M),
             )
         elif track.object_type == ObjectType.BUS:
             _plot_actor_bounding_box(
                 ax,
-                actor_trajectory[-1],
-                actor_headings[-1],
+                actor_trajectory,
+                actor_headings,
                 _BUS_COLOR,
                 (_ESTIMATED_BUS_LENGTH_M, _ESTIMATED_BUS_WIDTH_M),
             )
         elif track.object_type == ObjectType.PEDESTRIAN:
-            plt.plot(actor_trajectory[-1, 0], actor_trajectory[-1, 1], "o", color=_PEDESTRIAN_COLOR, markersize=6)
+            plt.plot(actor_trajectory[0], actor_trajectory[1], "o", color=_PEDESTRIAN_COLOR, markersize=6)
         elif track.object_type in _STATIC_OBJECT_TYPES:
-            plt.plot(actor_trajectory[-1, 0], actor_trajectory[-1, 1], "D", color=_OBSTACLE_COLOR, markersize=6)
+            plt.plot(actor_trajectory[0], actor_trajectory[1], "D", color=_OBSTACLE_COLOR, markersize=6)
 
     return track_bounds, cur_heading
 

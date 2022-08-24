@@ -14,7 +14,8 @@ import tensorflow as tf
 from pathlib import Path
 from math import pi
 # from datetime import datetime
-# from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split
+from sklearn.utils import shuffle
 # from scipy import stats
 
 from eval_error import final_position_error
@@ -23,7 +24,7 @@ logging.getLogger('tensorflow').setLevel(logging.ERROR)  # suppress warnings
 
 BATCH_SIZE = 64
 EPOCHS = 10
-FREQUENCY = 1
+FREQUENCY = 10
 num_vehicles = 1
 dataset_list = ['dataset', 'transformed_dataset', 'inertial_dataset']
 DATASET = '/' + dataset_list[1]
@@ -154,39 +155,33 @@ def split(data):
     return input_tensor, target_tensor
 
 
-data = []
-with open('.' + DATASET + '/trainset_0.pkl', 'rb') as f:
-    data.append(pickle.load(f)[:, :, 3:5])  # (batch, frame, feature) == (100000, 110, 5)
-with open('.' + DATASET + '/trainset_1.pkl', 'rb') as f:
-    data.append(pickle.load(f)[:, :, 3:5])  # (batch, frame, feature) == (98847, 110, 5)
-data = np.concatenate((data[0], data[1]), axis=0)
-input_tensor_train, target_tensor_train = split(data)
-BUFFER_SIZE = len(input_tensor_train)
-steps_per_epoch = len(input_tensor_train) // BATCH_SIZE
-dataset = tf.data.Dataset.from_tensor_slices((input_tensor_train, target_tensor_train)).shuffle(BUFFER_SIZE)
-dataset = dataset.batch(BATCH_SIZE, drop_remainder=True)
+data_dir = './data/val/val.npz'
+graph = np.stack([np.load(data_dir)['GLOBAL'], np.load(data_dir)['MEDIUM'], np.load(data_dir)['LOCAL']], axis=1) 
+traj = np.load(data_dir)['TRANSFORM'][:, :, 3:5].astype('float32')
+graph_train, graph_test, traj_train, traj_test = train_test_split(graph, traj, train_size=19200, random_state=42)
 
-with open('.' + DATASET + '/testset.pkl', 'rb') as f:
-    valdata = pickle.load(f)[:, :, 3:5]  # (batch, frame, feature) == (24864, 110, 5)
-input_tensor_val, target_tensor_val = split(valdata)
-groundtruth = valdata[:, -60:, :]
+TRAIN_STEPS = len(graph_train) // BATCH_SIZE
+
 
 loss_log = []
 speed_log = []
 for epoch in range(EPOCHS):
 
     start = time.time()
+    
+    graph_train, traj_train = shuffle(graph_train, traj_train)
 
     train_loss.reset_states()
     train_error_lat.reset_states()
     train_error_long.reset_states()
 
-    for (step, (inp, tar)) in enumerate(dataset.take(steps_per_epoch)):
+    for step in range(TRAIN_STEPS):
 
-        train_step(inp, tar)
-        loss_log.append([epoch * steps_per_epoch + step, tf.get_static_value(train_loss.result())])
+        train_step(traj_train[step * BATCH_SIZE:(step + 1) * BATCH_SIZE, :50, :], traj_train[step * BATCH_SIZE:(step + 1) * BATCH_SIZE, 50:, :])
+        dummy = graph_train[step * BATCH_SIZE:(step + 1) * BATCH_SIZE, 0, :, :, :] + graph_train[step * BATCH_SIZE:(step + 1) * BATCH_SIZE, 1, :, :, :] + graph_train[step * BATCH_SIZE:(step + 1) * BATCH_SIZE, 2, :, :, :]
+        loss_log.append([epoch * TRAIN_STEPS + step, tf.get_static_value(train_loss.result())])
 
-        if step % 100 == 0:
+        if step % 10 == 0:
             print(f'Epoch {epoch + 1} Step {step} Loss {train_loss.result():.4f}')
 
     print(f'Epoch {epoch + 1} Loss {train_loss.result():.4f}')
@@ -204,27 +199,20 @@ for epoch in range(EPOCHS):
     # print(f'Epoch {epoch + 1} Error {train_error_lat.result():.4f} {train_error_long.result():.4f}')
     # print(f'Inferring time for No. {rand} sample: {time.time() - start_infer:.6f} secs')
 
-    lat_error = []
-    long_error = []
-    result_last_step = []
-    for i in range(len(input_tensor_val) // BATCH_SIZE):
-        train_error_lat.reset_states()
-        train_error_long.reset_states()
+    train_error_lat.reset_states()
+    train_error_long.reset_states()
 
-        pred = infer_step(input_tensor_val[i * BATCH_SIZE:(i + 1) * BATCH_SIZE, :, :],
-                                  target_tensor_val[i * BATCH_SIZE:(i + 1) * BATCH_SIZE, :, :])
+    pred = infer_step(traj_test[:, :50, :], traj_test[:, 50:, :])
 
-        lat_error.append(train_error_lat.result())
-        long_error.append(train_error_long.result())
+    lat_error = np.array(train_error_lat.result())
+    long_error = np.array(train_error_long.result())
 
-        result_last_step.append(pred)
+    result_last_step = pred
         # print(f'Lat Error {train_error_lat.result():.4f} Long Error {train_error_long.result():.4f}\n')
 
-    lat_error = np.array(lat_error)
-    long_error = np.array(long_error)
-    infer_time = (time.time() - start_infer) / (i + 1)
+    infer_time = time.time() - start_infer
     speed_log.append([epoch + 1, infer_time])
-    print(f'Mean inferring time taken for {i + 1} batches: {infer_time:.6f} secs')
+    print(f'Mean inferring time taken for 1 batch: {infer_time:.6f} secs')
     print(f'Epoch {epoch + 1} Lat Error {lat_error.mean():.4f} Long Error {long_error.mean():.4f}\n')
 
 plt.figure()
@@ -237,7 +225,8 @@ plt.plot([speed_log[i][0] for i in range(len(speed_log))], [speed_log[i][1] for 
 plt.xlabel('Training Epoch'), plt.ylabel('Inferring Time')
 plt.savefig(result_path / 'inferring_time.jpg')
 
-result_last_step = np.concatenate(result_last_step, axis=0)
 print(f'result_last_step shape {result_last_step.shape}')
-error_last_step = final_position_error.eval(result_last_step, input_tensor_val, groundtruth, FREQUENCY, num_vehicles)
+error_last_step = final_position_error.eval(result_last_step, traj_test[:, :50, :], traj_test[:, 50:, :], FREQUENCY, num_vehicles)
 np.savetxt(result_path / 'error_last_step.csv', error_last_step, delimiter=',')
+with np.printoptions(formatter={'float': '{: 0.3f}'.format}):
+    print(error_last_step)

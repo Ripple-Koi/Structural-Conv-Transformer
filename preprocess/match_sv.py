@@ -6,7 +6,8 @@ from joblib import Parallel, delayed
 from pathlib import Path
 from pandas import DataFrame
 from math import pi
-
+from typing import List, Tuple
+from numpy import ndarray
 
 def find_sv(relative_xy, vehicles, transformed_vehicles):
     front_x = 15
@@ -89,7 +90,7 @@ def move_and_rotate(vehicles, theta_0, x_0, y_0):
     return transformed_vehicles.T
 
 
-def match_sv(tracks: DataFrame, save_dir: Path) -> None:    
+def match_sv(tracks: DataFrame, traj_save_path: Path) -> Tuple[List[ndarray], List[ndarray]]:    
     # tracks = pd.read_parquet(file)
     focal = tracks[tracks['track_id']==tracks['focal_track_id']]
     features = ['position_x','position_y','heading','velocity_x','velocity_y','track_id']
@@ -110,7 +111,8 @@ def match_sv(tracks: DataFrame, save_dir: Path) -> None:
         sv, transformed_sv, _ = find_sv(relative_xy, vehicles, transformed_vehicles)
         sv_traj.append(sv)
         transformed_sv_traj.append(transformed_sv)
-    np.savez_compressed(str(save_dir / "traj.npz"), ORIGIN=sv_traj, TRANSFORM=transformed_sv_traj) 
+    return sv_traj, transformed_sv_traj
+    # np.savez_compressed(str(traj_save_path), ORIGIN=sv_traj, TRANSFORM=transformed_sv_traj) 
 
 
 # if __name__ == "__main__":
