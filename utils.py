@@ -1,6 +1,90 @@
 import tensorflow as tf
 import numpy as np
 from scipy import interpolate
+from sklearn.model_selection import train_test_split
+from sklearn.utils import shuffle
+
+
+class DataGenerator:
+    def __init__(self, FREQUENCY, NUM_VEHICLES):
+        self.frequency, self.num_vehicles = FREQUENCY, NUM_VEHICLES
+        # load data here
+        data_dir = "./data/val/val.npz"
+        graph = np.stack(
+            [
+                np.load(data_dir)["GLOBAL"][:, :: int(10 / FREQUENCY), :, :],
+                np.load(data_dir)["MEDIUM"][:, :: int(10 / FREQUENCY), :, :],
+                np.load(data_dir)["LOCAL"][:, :: int(10 / FREQUENCY), :, :],
+            ],
+            axis=1,
+        )
+        feature_index = []
+        for i in range(NUM_VEHICLES):
+            feature_index.append(3 + i * 5)
+            feature_index.append(4 + i * 5)
+        traj = np.load(data_dir)["TRANSFORM"][:, :, feature_index].astype("float32")
+        self.graph_train, self.graph_test, traj_train, traj_test = train_test_split(
+            graph, traj, train_size=19200, random_state=42
+        )
+        self.input_traj_train, self.target_traj_train = juggle_and_split(
+            traj_train, NUM_VEHICLES
+        )
+        self.input_traj_test, self.target_traj_test = juggle_and_split(
+            traj_test, NUM_VEHICLES
+        )
+
+    def shuffle_trainset(self):
+        self.graph_train, self.input_traj_train, self.target_traj_train = shuffle(
+            self.graph_train, self.input_traj_train, self.target_traj_train
+        )
+
+    def next_train_batch(self, batch_size):
+        train_steps = len(self.graph_train) // batch_size
+        for step in range(train_steps):
+            yield (
+                self.input_traj_train[
+                    step * batch_size : (step + 1) * batch_size,
+                    int(10 / self.frequency) - 1 :: int(10 / self.frequency),
+                    :,
+                ],
+                self.target_traj_train[
+                    step * batch_size : (step + 1) * batch_size,
+                    int(10 / self.frequency)
+                    - 1 :: int(10 / self.frequency) * self.num_vehicles,
+                    :,
+                ],
+                self.graph_train[
+                    step * batch_size : (step + 1) * batch_size, :, :, :, :
+                ],
+            )
+
+    def next_test_batch(self, batch_size):
+        test_steps = len(self.graph_test) // batch_size
+        for step in range(test_steps):
+            yield (
+                self.input_traj_test[
+                    step * batch_size : (step + 1) * batch_size,
+                    int(10 / self.frequency) - 1 :: int(10 / self.frequency),
+                    :,
+                ],
+                self.target_traj_test[
+                    step * batch_size : (step + 1) * batch_size,
+                    int(10 / self.frequency)
+                    - 1 :: int(10 / self.frequency) * self.num_vehicles,
+                    :,
+                ],
+                self.graph_test[
+                    step * batch_size : (step + 1) * batch_size, :, :, :, :
+                ],
+                self.input_traj_test[
+                    step * batch_size : (step + 1) * batch_size,
+                    -self.num_vehicles : -self.num_vehicles + 1,
+                    :,
+                ],
+                self.target_traj_test[
+                    step * batch_size : (step + 1) * batch_size, :: self.num_vehicles, :
+                ],
+            )
 
 
 class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
@@ -22,18 +106,6 @@ class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
 def loss_function(real, pred):
     loss = tf.math.reduce_mean(abs(real - pred))
     return loss
-
-
-def error_function(real, pred):
-    error_lat = abs(
-        real[:, :, 1] - pred[:, :, 1]
-    )  # (batch_size, tar_seq_len / num_vehicles)
-    error_long = abs(
-        real[:, :, 0] - pred[:, :, 0]
-    )  # (batch_size, tar_seq_len / num_vehicles)
-    return tf.math.reduce_mean(error_lat, axis=0), tf.math.reduce_mean(
-        error_long, axis=0
-    )
 
 
 def juggle_and_split(data, num_vehicles):
