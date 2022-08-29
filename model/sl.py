@@ -1,35 +1,3 @@
-import logging
-import time
-import pickle
-# import collections
-# import os
-# import re
-# import string
-# import sys
-
-import numpy as np
-import matplotlib.pyplot as plt
-import tensorflow as tf
-
-from pathlib import Path
-from math import pi
-# from datetime import datetime
-from sklearn.model_selection import train_test_split
-from sklearn.utils import shuffle
-# from scipy import stats
-
-from eval_error import final_position_error
-
-logging.getLogger('tensorflow').setLevel(logging.ERROR)  # suppress warnings
-
-BATCH_SIZE = 64
-EPOCHS = 10
-FREQUENCY = 10
-num_vehicles = 1
-dataset_list = ['dataset', 'transformed_dataset', 'inertial_dataset']
-DATASET = '/' + dataset_list[1]
-MODEL = '/sl' + f'/{FREQUENCY}Hz'
-
 import tensorflow as tf
 
 
@@ -42,242 +10,161 @@ class structural_lstm_layer(tf.keras.layers.Layer):
     # | 4 |   | 5 |
     # |   |   |   |
 
-    def __init__(self, d_model):
+    def __init__(self, d_model, rate, activation):
         super(structural_lstm_layer, self).__init__()
 
-        self.target_lstm = tf.keras.layers.LSTM(d_model, return_sequences=True, activation=tf.nn.relu)
-        self.front_lstm = tf.keras.layers.LSTM(d_model, return_sequences=True, activation=tf.nn.relu)
-        self.leftfront_lstm = tf.keras.layers.LSTM(d_model, return_sequences=True, activation=tf.nn.relu)
-        self.rightfront_lstm = tf.keras.layers.LSTM(d_model, return_sequences=True, activation=tf.nn.relu)
-        self.leftrear_lstm = tf.keras.layers.LSTM(d_model, return_sequences=True, activation=tf.nn.relu)
-        self.rightrear_lstm = tf.keras.layers.LSTM(d_model, return_sequences=True, activation=tf.nn.relu)
+        self.target_lstm = tf.keras.layers.LSTM(
+            d_model, return_sequences=True, activation=activation
+        )
+        self.front_lstm = tf.keras.layers.LSTM(
+            d_model, return_sequences=True, activation=activation
+        )
+        self.leftfront_lstm = tf.keras.layers.LSTM(
+            d_model, return_sequences=True, activation=activation
+        )
+        self.rightfront_lstm = tf.keras.layers.LSTM(
+            d_model, return_sequences=True, activation=activation
+        )
+        self.leftrear_lstm = tf.keras.layers.LSTM(
+            d_model, return_sequences=True, activation=activation
+        )
+        self.rightrear_lstm = tf.keras.layers.LSTM(
+            d_model, return_sequences=True, activation=activation
+        )
 
+        self.layernorm0 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
+        self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
+        self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
+        self.layernorm3 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
+        self.layernorm4 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
+        self.layernorm5 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
 
-    def call(self, target_x, front_x, leftfront_x, rightfront_x, leftrear_x, rightrear_x):
-        target_inp = tf.concat([target_x, front_x, leftfront_x, rightfront_x, leftrear_x, rightrear_x], axis=-1)
+        self.dropout0 = tf.keras.layers.Dropout(rate)
+        self.dropout1 = tf.keras.layers.Dropout(rate)
+        self.dropout2 = tf.keras.layers.Dropout(rate)
+        self.dropout3 = tf.keras.layers.Dropout(rate)
+        self.dropout4 = tf.keras.layers.Dropout(rate)
+        self.dropout5 = tf.keras.layers.Dropout(rate)
+
+    def call(
+        self,
+        target_x,
+        front_x,
+        leftfront_x,
+        rightfront_x,
+        leftrear_x,
+        rightrear_x,
+        training,
+    ):
+        target_inp = tf.concat(
+            [target_x, front_x, leftfront_x, rightfront_x, leftrear_x, rightrear_x],
+            axis=-1,
+        )
+        target_out = self.target_lstm(target_inp)
+        target_out = self.dropout0(target_out, training=training)
+        target_out = self.layernorm0(target_x + target_out)
+
         front_inp = tf.concat([target_x, front_x, leftfront_x, rightfront_x], axis=-1)
+        front_out = self.front_lstm(front_inp)
+        front_out = self.dropout1(front_out, training=training)
+        front_out = self.layernorm1(front_x + front_out)
+
         leftfron_inp = tf.concat([target_x, front_x, leftfront_x, leftrear_x], axis=-1)
-        rightfront_inp = tf.concat([target_x, front_x, rightfront_x, rightrear_x], axis=-1)
+        leftfront_out = self.leftfront_lstm(leftfron_inp)
+        leftfront_out = self.dropout2(leftfront_out, training=training)
+        leftfront_out = self.layernorm2(leftfront_x + leftfront_out)
+
+        rightfront_inp = tf.concat(
+            [target_x, front_x, rightfront_x, rightrear_x], axis=-1
+        )
+        rightfront_out = self.rightfront_lstm(rightfront_inp)
+        rightfront_out = self.dropout3(rightfront_out, training=training)
+        rightfront_out = self.layernorm3(rightfront_x + rightfront_out)
+
         leftrear_inp = tf.concat([target_x, leftfront_x, leftrear_x], axis=-1)
+        leftrear_out = self.leftrear_lstm(leftrear_inp)
+        leftrear_out = self.dropout4(leftrear_out, training=training)
+        leftrear_out = self.layernorm4(leftrear_x + leftrear_out)
+
         rightrear_inp = tf.concat([target_x, rightfront_x, rightrear_x], axis=-1)
+        rightrear_out = self.rightrear_lstm(rightrear_inp)
+        rightrear_out = self.dropout5(rightrear_out, training=training)
+        rightrear_out = self.layernorm5(rightrear_x + rightrear_out)
 
-        target_x = self.target_lstm(target_inp)
-        front_x = self.front_lstm(front_inp)
-        leftfront_x = self.leftfront_lstm(leftfron_inp)
-        rightfront_x = self.rightfront_lstm(rightfront_inp)
-        leftrear_x = self.leftrear_lstm(leftrear_inp)
-        rightrear_x = self.rightrear_lstm(rightrear_inp)
-
-        return target_x, front_x, leftfront_x, rightfront_x, leftrear_x, rightrear_x
-
-
-class structural_lstm(tf.keras.Model):
-
-  def __init__(self, d_model, num_layers):
-    super().__init__()
-    
-    self.num_layers = num_layers
-    self.sl_layers = [structural_lstm_layer(d_model) for _ in range(num_layers)]
-    
-    self.gru2 = tf.keras.layers.GRU(32, return_sequences=False, activation=tf.nn.relu)
-    self.dense1 = tf.keras.layers.Dense(6*FREQUENCY)
-    self.dense2 = tf.keras.layers.Dense(6*FREQUENCY)
-
-  def call(self, inputs):
-    x0, x1, x2, x3, x4, x5 = inputs[:,:,0:2], inputs[:,:,2:4], inputs[:,:,4:6], inputs[:,:,6:8], inputs[:,:,8:10], inputs[:,:,10:12]
-    
-    for i in range(self.num_layers):
-        x0, x1, x2, x3, x4, x5 = self.sl_layers[i](x0, x1, x2, x3, x4, x5)
-    
-    x = self.gru2(x0)
-    long_pred = self.dense1(x)
-    lat_pred = self.dense2(x)
-    
-    return long_pred, lat_pred
-
-predictor = structural_lstm(d_model=32, num_layers=2)
+        return (
+            target_out,
+            front_out,
+            leftfront_out,
+            rightfront_out,
+            leftrear_out,
+            rightrear_out,
+        )
 
 
-##################### TODO: all below is the same, should bagged into function #####################
+class structural_conv_lstm(tf.keras.Model):
+    def __init__(self, d_model, num_layers, frequency, rate, activation, rnn_cell):
+        super().__init__()
+        self.dense0 = tf.keras.layers.Dense(int(d_model / 4), activation=activation)
 
+        self.frequency = frequency
+        self.num_layers = num_layers
+        self.sl_layers = [
+            structural_lstm_layer(d_model, rate, activation) for _ in range(num_layers)
+        ]
 
-# class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
-#     def __init__(self, d_model=128, warmup_steps=4000):  # total training steps around 70000
-#         super(CustomSchedule, self).__init__()
+        if rnn_cell == "gru":
+            self.rnn = tf.keras.layers.GRU(
+                d_model, return_sequences=False, activation=activation
+            )
+        if rnn_cell == "lstm":
+            self.rnn = tf.keras.layers.LSTM(
+                d_model, return_sequences=False, activation=activation
+            )
+        if rnn_cell == "rnn":
+            self.rnn = tf.keras.layers.SimpleRNN(
+                d_model, return_sequences=False, activation=activation
+            )
+        self.dense1 = tf.keras.layers.Dense(6 * frequency)
+        self.dense2 = tf.keras.layers.Dense(6 * frequency)
+        self.dropout1 = tf.keras.layers.Dropout(rate)
+        self.dropout2 = tf.keras.layers.Dropout(rate)
 
-#         self.d_model = d_model
-#         self.d_model = tf.cast(self.d_model, tf.float32)
+    def call(self, inputs, graph, training):
+        x = self.dense0(inputs)  # (batch_size, inp_seq_len, d_model/4)
+        x = self.dropout1(x, training=training)
 
-#         self.warmup_steps = warmup_steps
+        target_x = x[:, :: self.frequency, :]
+        front_x = x[:, 1 :: self.frequency, :]
+        leftfront_x = x[:, 2 :: self.frequency, :]
+        rightfront_x = x[:, 3 :: self.frequency, :]
+        leftrear_x = x[:, 4 :: self.frequency, :]
+        rightrear_x = x[:, 5 :: self.frequency, :]
+        for i in range(self.num_layers):
+            (
+                target_x,
+                front_x,
+                leftfront_x,
+                rightfront_x,
+                leftrear_x,
+                rightrear_x,
+            ) = self.sl_layers[i](
+                target_x,
+                front_x,
+                leftfront_x,
+                rightfront_x,
+                leftrear_x,
+                rightrear_x,
+                training,
+            )
 
-#     def __call__(self, step):
-#         arg1 = tf.math.rsqrt(step)
-#         arg2 = step * (self.warmup_steps ** -1.5)
+        x = self.rnn(
+            tf.concat(
+                [target_x, front_x, leftfront_x, rightfront_x, leftrear_x, rightrear_x],
+                axis=-1,
+            )
+        )  # (batch_size, seq_len, 6 * d_model)
+        x = self.dropout2(x, training=training)
+        long_pred = self.dense1(x)
+        lat_pred = self.dense2(x)
 
-#         return tf.math.rsqrt(self.d_model * 2) * tf.math.minimum(arg1, arg2)
-
-
-# learning_rate = CustomSchedule()
-optimizer = tf.keras.optimizers.Adam(0.0001)
-# optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
-
-# temp_learning_rate_schedule = CustomSchedule()
-# plt.plot(temp_learning_rate_schedule(tf.range(70000, dtype=tf.float32)))
-# plt.ylabel("Learning Rate")
-# plt.xlabel("Train Step")
-# plt.show()
-
-# TODO: weighted MAE
-loss_object = tf.keras.losses.MeanAbsoluteError(reduction=tf.keras.losses.Reduction.NONE)
-train_loss = tf.keras.metrics.Mean(name='train_loss')
-train_error_lat = tf.keras.metrics.Mean(name='train_error_lat')
-train_error_long = tf.keras.metrics.Mean(name='train_error_long')
-
-
-def loss_function(real, pred):
-
-    loss = tf.math.reduce_mean(abs(real - pred))
-
-    return loss
-
-def error_function(real, pred):
-    error_lat = abs(real[:, :, 1] - pred[:, :, 1])  # (batch_size, tar_seq_len / num_vehicles)
-    error_long = abs(real[:, :, 0] - pred[:, :, 0])  # (batch_size, tar_seq_len / num_vehicles)
-    return tf.math.reduce_mean(error_lat, axis=0), tf.math.reduce_mean(error_long, axis=0)
-
-
-# The @tf.function trace-compiles train_step into a TF graph for faster
-# execution. The function specializes to the precise shape of the argument
-# tensors. To avoid re-tracing due to the variable sequence lengths or variable
-# batch sizes (the last batch is smaller), use input_signature to specify
-# more generic shapes.
-
-# It seems faster without it.....
-# TODO: inp.shape and tar.shape based on vehicle numbers
-# train_step_signature = [
-#     tf.TensorSpec(shape=(None, None, 6), dtype=tf.float32),
-#     tf.TensorSpec(shape=(None, None, 6), dtype=tf.float32),
-# ]
-
-
-# @tf.function(input_signature=train_step_signature)
-@tf.function
-def train_step(inp, tar):
-
-    with tf.GradientTape() as tape:
-        long_pred, lat_pred = predictor(inp)
-        loss = loss_function(tar, tf.stack([long_pred, lat_pred], axis=-1))
-
-    gradients = tape.gradient(loss, predictor.trainable_variables)
-    optimizer.apply_gradients(zip(gradients, predictor.trainable_variables))
-
-    train_loss(loss)
-
-
-@tf.function
-def infer_step(inp, tar):
-    long_pred, lat_pred = predictor(inp)
-    error_lat, error_long = error_function(tar, tf.stack([long_pred, lat_pred], axis=-1))
-    train_error_lat(error_lat)
-    train_error_long(error_long)
-    # all_steps, last_step
-    return tf.stack([long_pred, lat_pred], axis=-1)  # (batch_size, seq_len, feature_size)
-
-
-checkpoint_path = Path('./ckpt/' + DATASET + MODEL + '/test')
-checkpoint_path.mkdir(exist_ok=True, parents=True)
-ckpt = tf.train.Checkpoint(predictor,
-                           optimizer=optimizer)
-ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_path, max_to_keep=20)
-
-# # if a checkpoint exists, restore the latest checkpoint.
-# if ckpt_manager.latest_checkpoint:
-#     ckpt.restore(ckpt_manager.latest_checkpoint)
-#     print('Latest checkpoint restored!!')
-
-result_path = Path('./result' + DATASET + MODEL + '/test')
-result_path.mkdir(parents=True, exist_ok=True)
-
-def split(data):
-    data = data[:, ::int(10/FREQUENCY), :]
-    # split 5 for past, 6 for future
-    input_tensor = data[:, :5 * FREQUENCY, :]
-    target_tensor = data[:, -6 * FREQUENCY:, :]
-    return input_tensor, target_tensor
-
-
-data_dir = './data/val/val.npz'
-graph = np.stack([np.load(data_dir)['GLOBAL'], np.load(data_dir)['MEDIUM'], np.load(data_dir)['LOCAL']], axis=1) 
-traj = np.load(data_dir)['TRANSFORM'][:, :, [3,4,8,9,13,14,18,19,23,24,28,29]].astype('float32')
-graph_train, graph_test, traj_train, traj_test = train_test_split(graph, traj, train_size=19200, random_state=42)
-
-TRAIN_STEPS = len(graph_train) // BATCH_SIZE
-
-
-loss_log = []
-speed_log = []
-for epoch in range(EPOCHS):
-
-    start = time.time()
-    
-    graph_train, traj_train = shuffle(graph_train, traj_train)
-
-    train_loss.reset_states()
-    train_error_lat.reset_states()
-    train_error_long.reset_states()
-
-    for step in range(TRAIN_STEPS):
-
-        train_step(traj_train[step * BATCH_SIZE:(step + 1) * BATCH_SIZE, :50, :], traj_train[step * BATCH_SIZE:(step + 1) * BATCH_SIZE, 50:, :2])
-        dummy = graph_train[step * BATCH_SIZE:(step + 1) * BATCH_SIZE, 0, :, :, :] + graph_train[step * BATCH_SIZE:(step + 1) * BATCH_SIZE, 1, :, :, :] + graph_train[step * BATCH_SIZE:(step + 1) * BATCH_SIZE, 2, :, :, :]
-        loss_log.append([epoch * TRAIN_STEPS + step, tf.get_static_value(train_loss.result())])
-
-        if step % 10 == 0:
-            print(f'Epoch {epoch + 1} Step {step} Loss {train_loss.result():.4f}')
-
-    print(f'Epoch {epoch + 1} Loss {train_loss.result():.4f}')
-    print(f'Training time taken for 1 epoch: {time.time() - start:.2f} secs\n')
-
-    if (epoch + 1) % 10 == 0:
-        ckpt_save_path = ckpt_manager.save()
-        print(f'Saving checkpoint for epoch {epoch + 1} at {ckpt_save_path}')
-
-    # test on inferring one random sample or all samples
-    start_infer = time.time()
-
-    # rand = np.random.randint(input_tensor_val.shape[0])
-    # infer_step(input_tensor_val[rand:rand+1, :, :], target_tensor_val[rand:rand+1, :, :])
-    # print(f'Epoch {epoch + 1} Error {train_error_lat.result():.4f} {train_error_long.result():.4f}')
-    # print(f'Inferring time for No. {rand} sample: {time.time() - start_infer:.6f} secs')
-
-    train_error_lat.reset_states()
-    train_error_long.reset_states()
-
-    pred = infer_step(traj_test[:, :50, :], traj_test[:, 50:, :2])
-
-    lat_error = np.array(train_error_lat.result())
-    long_error = np.array(train_error_long.result())
-
-    result_last_step = pred
-        # print(f'Lat Error {train_error_lat.result():.4f} Long Error {train_error_long.result():.4f}\n')
-
-    infer_time = time.time() - start_infer
-    speed_log.append([epoch + 1, infer_time])
-    print(f'Mean inferring time taken for 1 batch: {infer_time:.6f} secs')
-    print(f'Epoch {epoch + 1} Lat Error {lat_error.mean():.4f} Long Error {long_error.mean():.4f}\n')
-
-plt.figure()
-plt.plot([loss_log[i][0] for i in range(len(loss_log))], [loss_log[i][1] for i in range(len(loss_log))])
-plt.xlabel('Training Steps'), plt.ylabel('Training Loss')
-plt.savefig(result_path / 'training_loss.jpg')
-
-plt.figure()
-plt.plot([speed_log[i][0] for i in range(len(speed_log))], [speed_log[i][1] for i in range(len(speed_log))])
-plt.xlabel('Training Epoch'), plt.ylabel('Inferring Time')
-plt.savefig(result_path / 'inferring_time.jpg')
-
-print(f'result_last_step shape {result_last_step.shape}')
-error_last_step = final_position_error.eval(result_last_step, traj_test[:, :50, :2], traj_test[:, 50:, :2], FREQUENCY, num_vehicles)
-np.savetxt(result_path / 'error_last_step.csv', error_last_step, delimiter=',')
-with np.printoptions(formatter={'float': '{: 0.3f}'.format}):
-    print(error_last_step)
+        return long_pred, lat_pred

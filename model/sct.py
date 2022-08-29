@@ -422,7 +422,9 @@ class structural_conv_transformer(tf.keras.Model):
             graph, training
         )  # (batch_size, inp_seq_len, d_model/4)
         x = tf.concat([x0, x1, x2, x3], axis=-1)  # (batch_size, inp_seq_len, d_model)
-        enc_padding_mask = create_masks(x, self.num_vehicles)
+        enc_padding_mask = create_masks(
+            x0, self.num_vehicles
+        )  # create mask if trajectory features are all zero
         x = self.encoder(
             x, training, enc_padding_mask, self.num_vehicles
         )  # (batch_size, inp_seq_len, d_model)

@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 from pathlib import Path
 
-from model.sct import structural_conv_transformer
+from model.model_builder import model_builder
 from utils import (
     DataGenerator,
     CustomSchedule,
@@ -15,70 +15,47 @@ from utils import (
 
 # logging.getLogger('tensorflow').setLevel(logging.ERROR)  # suppress warnings
 default_configs = dict(
-    model="sct",
+    model="scl",
     dataset="transformed_dataset",
-    batch_size=64,
-    epochs=2,
+    batch_size=16,
+    epochs=30,
     frequency=10,
     num_vehicles=6,
-    activation="relu",
-    learning_rate=0.0001,
+    activation="tanh",
+    learning_rate=0.0003,
     lr_schedule=True,
-    d_model=128,
-    num_heads=16,
+    d_model=256,
+    num_heads=8,
     dropout_rate=0.4,
-    rnn_cell="rnn",
+    rnn_cell="lstm",
+    # TODO ST layer num
+    # TODO Feature size
     # TODO LR parameters
     # TODO BatchNorm, LayerNorm
     # TODO CNN num, kernel, pool
     # TODO Layer-wise activation, d_model
     # TODO Dataset
 )
-wandb.init(config=default_configs, project="my-test-project")
+wandb.init(config=default_configs, project="best-sct")
 cfg = wandb.config
 
-BATCH_SIZE = cfg.batch_size
-EPOCHS = cfg.epochs
-FREQUENCY = cfg.frequency
-NUM_VEHICLES = cfg.num_vehicles
-DATASET = cfg.dataset
-MODEL = cfg.model
-ACTIVATION = cfg.activation
-LR = cfg.learning_rate
-LR_SCHEDULE = cfg.lr_schedule
-D_MODEL = cfg.d_model
-NUM_HEADS = cfg.num_heads
-DROPOUT_RATE = cfg.dropout_rate
-RNN_CELL = cfg.rnn_cell
-
-checkpoint_path = Path(f"./ckpt/{DATASET}/{MODEL}/{FREQUENCY}Hz/test")
+checkpoint_path = Path(f"./ckpt/{cfg.dataset}/{cfg.model}/{cfg.frequency}Hz/test")
 checkpoint_path.mkdir(exist_ok=True, parents=True)
-result_path = Path(f"./result/{DATASET}/{MODEL}/{FREQUENCY}Hz/test")
+result_path = Path(f"./result/{cfg.dataset}/{cfg.model}/{cfg.frequency}Hz/test")
 result_path.mkdir(parents=True, exist_ok=True)
 
-datagenerator = DataGenerator(FREQUENCY, NUM_VEHICLES)
+data_generator = DataGenerator(cfg.frequency, cfg.num_vehicles)
 
-predictor = structural_conv_transformer(
-    num_layers=1,
-    d_model=D_MODEL,
-    num_heads=NUM_HEADS,
-    dff=D_MODEL,
-    pe_input=5 * FREQUENCY,
-    rate=DROPOUT_RATE,
-    activation=ACTIVATION,
-    num_vehicles=NUM_VEHICLES,
-    frequency=FREQUENCY,
-    rnn_cell=RNN_CELL,
-)
+predictor = model_builder(cfg)
 
-if LR_SCHEDULE:
+if cfg.lr_schedule:
     learning_rate = CustomSchedule(
-        peak_lr=LR,
-        end_lr=LR / 5,
-        total_steps=EPOCHS * len(datagenerator.graph_train) / BATCH_SIZE,
+        peak_lr=cfg.learning_rate,
+        end_lr=cfg.learning_rate / 5,
+        total_steps=cfg.epochs * len(data_generator.graph_train) / cfg.batch_size,
     )
 else:
-    learning_rate = LR
+    learning_rate = cfg.learning_rate
 optimizer = tf.keras.optimizers.Adam(
     learning_rate, beta_1=0.9, beta_2=0.98, epsilon=1e-9
 )
@@ -115,8 +92,8 @@ def infer_step(inp, tar, graph):
 
 train_loss = tf.keras.metrics.Mean(name="train_loss")
 val_loss = tf.keras.metrics.Mean(name="val_loss")
-for epoch in range(EPOCHS):
-    datagenerator.shuffle_trainset()
+for epoch in range(cfg.epochs):
+    data_generator.shuffle_trainset()
     train_loss.reset_states()
     val_loss.reset_states()
     train_loss_log = []
@@ -127,7 +104,7 @@ for epoch in range(EPOCHS):
     start = time.time()
 
     for step, (inp, tar, graph) in enumerate(
-        datagenerator.next_train_batch(BATCH_SIZE)
+        data_generator.next_train_batch(cfg.batch_size)
     ):
 
         train_step(inp, tar, graph)
@@ -148,7 +125,7 @@ for epoch in range(EPOCHS):
     start_infer = time.time()
 
     for step, (inp, tar, graph, current_frame, ground_truth) in enumerate(
-        datagenerator.next_test_batch(BATCH_SIZE)
+        data_generator.next_test_batch(cfg.batch_size)
     ):  # Infer in batch to avoid OOM
 
         # TODO timestep index slice should be [9::10] for 1Hz
