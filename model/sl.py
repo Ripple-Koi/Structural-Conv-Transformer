@@ -101,12 +101,12 @@ class structural_lstm_layer(tf.keras.layers.Layer):
         )
 
 
-class structural_conv_lstm(tf.keras.Model):
-    def __init__(self, d_model, num_layers, frequency, rate, activation, rnn_cell):
+class structural_lstm(tf.keras.Model):
+    def __init__(self, num_layers, d_model, rate, activation, frequency, rnn_cell):
         super().__init__()
         self.dense0 = tf.keras.layers.Dense(int(d_model / 4), activation=activation)
 
-        self.frequency = frequency
+        self.dense_neck = tf.keras.layers.Dense(d_model, activation=activation)
         self.num_layers = num_layers
         self.sl_layers = [
             structural_lstm_layer(d_model, rate, activation) for _ in range(num_layers)
@@ -128,17 +128,20 @@ class structural_conv_lstm(tf.keras.Model):
         self.dense2 = tf.keras.layers.Dense(6 * frequency)
         self.dropout1 = tf.keras.layers.Dropout(rate)
         self.dropout2 = tf.keras.layers.Dropout(rate)
+        self.dropout3 = tf.keras.layers.Dropout(rate)
 
     def call(self, inputs, graph, training):
         x = self.dense0(inputs)  # (batch_size, inp_seq_len, d_model/4)
         x = self.dropout1(x, training=training)
-
-        target_x = x[:, :: self.frequency, :]
-        front_x = x[:, 1 :: self.frequency, :]
-        leftfront_x = x[:, 2 :: self.frequency, :]
-        rightfront_x = x[:, 3 :: self.frequency, :]
-        leftrear_x = x[:, 4 :: self.frequency, :]
-        rightrear_x = x[:, 5 :: self.frequency, :]
+        x = self.dense_neck(x)
+        x = self.dropout2(x, training=training)
+        
+        target_x = x[:, ::6, :]
+        front_x = x[:, 1::6, :]
+        leftfront_x = x[:, 2::6, :]
+        rightfront_x = x[:, 3::6, :]
+        leftrear_x = x[:, 4::6, :]
+        rightrear_x = x[:, 5::6, :]
         for i in range(self.num_layers):
             (
                 target_x,
@@ -163,7 +166,7 @@ class structural_conv_lstm(tf.keras.Model):
                 axis=-1,
             )
         )  # (batch_size, seq_len, 6 * d_model)
-        x = self.dropout2(x, training=training)
+        x = self.dropout3(x, training=training)
         long_pred = self.dense1(x)
         lat_pred = self.dense2(x)
 

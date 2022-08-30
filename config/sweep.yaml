@@ -1,40 +1,42 @@
 project: Sweep-sct
-name: first-sweep-sct
+name: Third-sweep-sct
 description: TODO LR parameters; BatchNorm, LayerNorm; CNN num, kernel, pool; Layer-wise activation, d_model; Dataset
 program: train.py
-method: bayes
+method: grid
 metric:
   goal: minimize
   name: final_distance_error
 parameters:
   num_vehicles:
-    values: [2, 4, 6]
+    value: 6
   num_heads:
-    values: [2, 4, 8, 16]
+    value: 4
   d_model:
-    values: [16, 32, 64, 128, 256]
+    values: [512, 1024]
   model:
     value: "sct"
   rnn_cell:
-    values: ["gru", "lstm", "rnn"]
+    value: "gru"
   dataset:
     value: "transformed_dataset"
   batch_size:
-    values: [16, 32, 64, 128]
+    value: 8
   epochs:
     value: 30
   frequency:
-    values: [1, 2, 5, 10]
+    value: 10
   activation:
-    values: ["relu", "tanh", "selu", "sigmoid", "elu"]
+    value: "tanh"
   dropout_rate:
-    values: [0.1, 0.2, 0.4]
+    value: 0.3
   learning_rate:
-    values: [0.001, 0.0001, 0.0003, 0.00001, 0.00003]
+    values: [0.0002, 0.0003]
   lr_schedule:
-    values: [False, True]
-early_terminate:
-  type: hyperband
-  s: 3
-  eta: 2
-  min_iter: 4
+    value: True
+  num_layers:
+    values: [1, 2, 3]
+# early_terminate:
+#   type: hyperband
+#   s: 3
+#   eta: 2
+#   min_iter: 4

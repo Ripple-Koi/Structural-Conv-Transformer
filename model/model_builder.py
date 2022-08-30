@@ -55,4 +55,52 @@ def model_builder(cfg):
             rnn_cell=cfg.rnn_cell,
         )
 
+    if cfg.model == "clstm":
+        from model.baseline import conv_lstm
+
+        model = conv_lstm(
+            num_layers=2,
+            d_model=cfg.d_model,
+            rate=cfg.dropout_rate,
+            activation=cfg.activation,
+            frequency=cfg.frequency,
+            rnn_cell=cfg.rnn_cell,
+        )
+
+    if cfg.model == "lstm":
+        from model.baseline import lstm_model
+
+        model = lstm_model(
+            num_layers=2,
+            d_model=cfg.d_model,
+            rate=cfg.dropout_rate,
+            activation=cfg.activation,
+            frequency=cfg.frequency,
+            rnn_cell=cfg.rnn_cell,
+        )
+        
+    if cfg.model == "cgru":
+        from model.baseline import conv_gru
+
+        model = conv_gru(
+            num_layers=2,
+            d_model=cfg.d_model,
+            rate=cfg.dropout_rate,
+            activation=cfg.activation,
+            frequency=cfg.frequency,
+            rnn_cell=cfg.rnn_cell,
+        )
+
+    if cfg.model == "gru":
+        from model.baseline import gru_model
+
+        model = gru_model(
+            num_layers=2,
+            d_model=cfg.d_model,
+            rate=cfg.dropout_rate,
+            activation=cfg.activation,
+            frequency=cfg.frequency,
+            rnn_cell=cfg.rnn_cell,
+        )
+
     return model
