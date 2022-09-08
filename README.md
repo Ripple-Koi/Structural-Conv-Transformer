@@ -1,8 +1,10 @@
-# Structural-Conv-Transformer
-A simple and well designed structure is essential for any Deep Learning project, so after a lot of practice and contributing in tensorflow projects here's a tensorflow project template that combines   **simplcity**, **best practice for folder structure** and **good OOP design**.
-The main idea is that there's much stuff you do every time you start your tensorflow project, so wrapping all this shared stuff will help you to change just the core idea every time you start a new tensorflow project.
+# [WIP] Structural-Conv-Transformer
 
-**So, here's a simple tensorflow template that help you get into your main project faster and just focus on your core (Model, Training, ...etc)**
+**Reference**
+- [Argoverse 2 Motion Forecasting Dataset](https://www.argoverse.org/av2.html#forecasting-link)
+- [Integrated Graphical Representation](https://ieeexplore.ieee.org/document/9852308)
+- [Structural Transformer](https://ieeexplore.ieee.org/document/9847009)
+
 # Table Of Contents
 
 -  [In a Nutshell](#in-a-nutshell)
